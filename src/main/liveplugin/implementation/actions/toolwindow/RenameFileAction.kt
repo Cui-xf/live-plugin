@@ -24,7 +24,7 @@ class RenameFileAction: FileChooserAction("Rename", "", null) {
 
         /**
          * Couldn't find any other non-hacky way to update file chooser tree to show new file name
-         * (because com.intellij.openapi.fileChooser.tree.FileTreeModel.process code is unfinished and has todos).
+         * (because liveplugin.implementation.actions.toolwindow.tree.FileTreeModel.process code is unfinished and has todos).
          *
          * There is a problem with this hack that if new file name is longer than previous name,
          * it's not shown fully. The workaround is to collapse, expand parent tree node.

@@ -3,6 +3,19 @@ import static org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_8
 //file:noinspection GrMethodMayBeStatic // Disable because it has false positives
 //file:noinspection GroovyAssignabilityCheck // Disable because it has false positives
 
+buildscript {
+	repositories {
+		maven { url 'https://maven.aliyun.com/repository/google/' }
+		maven { url 'https://maven.aliyun.com/repository/public/' }
+		maven { url 'https://maven.aliyun.com/repository/central/' }
+		maven { url 'https://maven.aliyun.com/repository/gradle-plugin/' }
+		maven { url 'https://jitpack.io' }
+		maven { url 'https://plugins.gradle.org/m2/' }
+		mavenCentral()
+		mavenLocal()
+	}
+}
+
 plugins {
 	id 'org.jetbrains.intellij' version '1.17.2'
 	id 'org.jetbrains.kotlin.jvm' version '1.8.10'
@@ -10,7 +23,13 @@ plugins {
 	id 'groovy'
 }
 
+
 repositories {
+	maven { url 'https://maven.aliyun.com/repository/google/' }
+	maven { url 'https://maven.aliyun.com/repository/public/' }
+	maven { url 'https://maven.aliyun.com/repository/central/' }
+	maven { url 'https://maven.aliyun.com/repository/gradle-plugin/' }
+	maven { url 'https://jitpack.io' }
 	mavenCentral()
 }
 
@@ -25,7 +44,7 @@ intellij {
 	version = System.getenv().getOrDefault("IJ_VERSION",
 //		"221.5080.210" // Compatibility with IJ 2022.1 (Groovy 3, Kotlin 1.6, changes in PluginClassLoader https://github.com/dkandalov/live-plugin/issues/123)
 //		 "231.9161.38" // Compatibility with IJ 2023.1 (Kotlin 1.8, changes in PluginClassLoader https://github.com/dkandalov/live-plugin/issues/155)
-		 "241.13688.18-EAP-SNAPSHOT" // Compatibility with IJ 2024.1 (Groovy 3.0.19, changes in PluginClassLoader)
+		"241.13688.18-EAP-SNAPSHOT" // Compatibility with IJ 2024.1 (Groovy 3.0.19, changes in PluginClassLoader)
 	)
 	pluginName = "LivePlugin"
 	downloadSources = true
@@ -174,7 +193,7 @@ static expectToContain(Set actual, Set expected) {
 	if (!actual.containsAll(expected)) {
 		throw new GradleException(
 			"Didn't contain expected:\n" +
-			(expected - actual).join("\n") + "\n"
+				(expected - actual).join("\n") + "\n"
 		)
 	}
 }
@@ -183,9 +202,9 @@ static expectToBeEqual(Collection actual, Collection expected) {
 	if (actual != expected) {
 		throw new GradleException(
 			"Expected:\n" +
-			expected.join("\n") + "\n" +
-			"but was:\n" +
-			actual.join("\n")
+				expected.join("\n") + "\n" +
+				"but was:\n" +
+				actual.join("\n")
 		)
 	}
 }

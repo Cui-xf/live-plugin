@@ -7,7 +7,7 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.fileChooser.FileSystemTree;
 import com.intellij.openapi.fileChooser.actions.FileChooserAction;
 import com.intellij.openapi.fileChooser.ex.FileChooserKeys;
-import com.intellij.openapi.fileChooser.ex.FileSystemTreeImpl;
+import liveplugin.implementation.actions.toolwindow.tree.FileSystemTreeImpl;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.UnknownFileType;
 import com.intellij.openapi.project.Project;
@@ -86,7 +86,7 @@ public class NewFileAction extends FileChooserAction {
         }
     }
 
-    // modified copy of com.intellij.openapi.fileChooser.ex.FileSystemTreeImpl.createNewFile()
+    // modified copy of liveplugin.implementation.actions.toolwindow.tree.FileSystemTreeImpl.createNewFile()
     public static Exception createNewFile(Project project, final FileSystemTreeImpl fileSystemTree,
                                     final VirtualFile parentDirectory, final String newFileName,
                                     final FileType fileType, final String initialContent) {
