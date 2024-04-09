@@ -40,6 +40,8 @@ import liveplugin.implementation.actions.settings.AddLivePluginAndIdeJarsAsDepen
 import liveplugin.implementation.actions.settings.RunPluginsOnIDEStartAction
 import liveplugin.implementation.actions.settings.RunProjectSpecificPluginsAction
 import liveplugin.implementation.actions.toolwindow.NewElementPopupAction.Companion.livePluginNewElementPopup
+import liveplugin.implementation.actions.toolwindow.tree.PluginTree
+import liveplugin.implementation.actions.toolwindow.tree.PluginTreeMode
 import liveplugin.implementation.common.Icons.addPluginIcon
 import liveplugin.implementation.common.Icons.collapseAllIcon
 import liveplugin.implementation.common.Icons.helpIcon
@@ -51,6 +53,7 @@ import liveplugin.implementation.common.IdeUtil.livePluginActionPlace
 import liveplugin.implementation.common.toFilePath
 import liveplugin.implementation.isPluginFolder
 import org.jetbrains.annotations.NonNls
+import org.jetbrains.kotlin.idea.core.util.cancelOnDisposal
 import java.awt.GridLayout
 import java.awt.event.MouseListener
 import javax.swing.Icon
@@ -58,7 +61,7 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JTree
 
-class LivePluginToolWindowFactory: ToolWindowFactory, DumbAware {
+class LivePluginToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         toolWindow.contentManager.addContent(PluginToolWindow(project).createContent())
     }
@@ -119,7 +122,7 @@ private class PluginToolWindow(project: Project) {
         }
     }
 
-    private class MySimpleToolWindowPanel(vertical: Boolean, private val fileSystemTree: FileSystemTree): SimpleToolWindowPanel(vertical) {
+    private class MySimpleToolWindowPanel(vertical: Boolean, private val fileSystemTree: FileSystemTree) : SimpleToolWindowPanel(vertical) {
         /**
          * Provides context for actions in plugin tree popup menu.
          * Without it the actions will be disabled or won't work.
@@ -136,6 +139,7 @@ private class PluginToolWindow(project: Project) {
                     // (without it, they will be disabled or won't work).
                     fileSystemTree
                 }
+
                 FileChooserKeys.NEW_FILE_TYPE.name           -> groovyFileType
                 FileChooserKeys.DELETE_ACTION_AVAILABLE.name -> true
                 PlatformDataKeys.VIRTUAL_FILE_ARRAY.name     -> fileSystemTree.selectedFiles
@@ -144,7 +148,7 @@ private class PluginToolWindow(project: Project) {
             }
     }
 
-    private class ShowHelpAction: AnAction("Show Help on GitHub", "Open help page on GitHub", helpIcon), DumbAware {
+    private class ShowHelpAction : AnAction("Show Help on GitHub", "Open help page on GitHub", helpIcon), DumbAware {
         override fun actionPerformed(e: AnActionEvent) =
             BrowserUtil.browse("https://github.com/dkandalov/live-plugin#getting-started")
     }
@@ -155,7 +159,7 @@ private class PluginToolWindow(project: Project) {
             val myTree = MyTree(project)
             EditSourceOnDoubleClickHandler.install(myTree) // This handler only seems to work before creating FileSystemTreeImpl.
 
-            val fileSystemTree = FileSystemTreeImpl(project, createFileChooserDescriptor(), myTree, null, null, null)
+            val fileSystemTree = PluginTree(myTree)
             Disposer.register(project, fileSystemTree)
             fileSystemTree.tree.let {
                 EditSourceOnEnterKeyHandler.install(it) // This handler only seems to work after creating FileSystemTreeImpl.
@@ -164,22 +168,6 @@ private class PluginToolWindow(project: Project) {
             return fileSystemTree
         }
 
-        private fun createFileChooserDescriptor(): FileChooserDescriptor {
-            val descriptor = object: FileChooserDescriptor(true, true, true, false, true, true) {
-                override fun getIcon(file: VirtualFile) = if (file.toFilePath().isPluginFolder()) pluginIcon else super.getIcon(file)
-                override fun getName(virtualFile: VirtualFile) = virtualFile.name
-                override fun getComment(virtualFile: VirtualFile?) = ""
-            }.also {
-                it.withShowFileSystemRoots(false)
-                it.withTreeRootVisible(false)
-            }
-
-            runWriteAction {
-                descriptor.setRoots(VfsUtil.createDirectoryIfMissing(livePluginsPath.value))
-            }
-
-            return descriptor
-        }
 
         private fun JTree.installPopupMenu() {
             fun shortcutsOf(actionId: String) = KeymapManager.getInstance().activeKeymap.getShortcuts(actionId)
@@ -206,7 +194,7 @@ private class PluginToolWindow(project: Project) {
             return popupHandler
         }
 
-        private class MyTree(private val project: Project): Tree(), DataProvider {
+        private class MyTree(private val project: Project) : Tree(), DataProvider {
             init {
                 emptyText.text = "No plugins to show"
                 isRootVisible = false
@@ -215,15 +203,18 @@ private class PluginToolWindow(project: Project) {
             override fun getData(@NonNls dataId: String): Any? =
                 when (dataId) {
                     // NAVIGATABLE_ARRAY is used to open files in tool window on double-click/enter.
-                    PlatformDataKeys.NAVIGATABLE_ARRAY.name       -> {
-                        TreeUtil.collectSelectedObjectsOfType(this, FileNode::class.java)
+                    PlatformDataKeys.NAVIGATABLE_ARRAY.name -> {
+                        TreeUtil.collectSelectedObjectsOfType(this, PluginTreeMode.Node::class.java)
                             .mapNotNull { node ->
-                                if (node.file.isDirectory) null // Exclude directories so that they're not navigatable from the tree and EditSourceOnEnterKeyHandler expands/collapses tree nodes.
-                                else OpenFileDescriptor(project, node.file)
+                                if (node.file != null && !node.file.isDirectory) OpenFileDescriptor(project, node.file)
+                                else {
+                                    null // Exclude directories so that they're not navigatable from the tree and EditSourceOnEnterKeyHandler expands/collapses tree nodes.
+                                }
                             }
                             .toTypedArray()
                     }
-                    else                                          -> null
+
+                    else                                    -> null
                 }
         }
     }

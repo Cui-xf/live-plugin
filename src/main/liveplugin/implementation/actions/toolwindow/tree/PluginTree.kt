@@ -12,7 +12,8 @@ import com.intellij.ui.TreeUIHelper
 import com.intellij.ui.tree.AsyncTreeModel
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.tree.TreeUtil
-import java.awt.Color
+import liveplugin.implementation.LivePlugin
+import liveplugin.implementation.common.toFilePath
 import java.awt.event.KeyEvent
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
@@ -22,37 +23,39 @@ import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
 import kotlin.streams.asStream
 
-open class PluginTree(tree: Tree) : FileSystemTree {
+class PluginTree(tree: Tree) : FileSystemTree {
     private val myTree = tree
-    private val myFileTreeModel = PluginTreeMode(tree, listOf())
-    private val myAsyncTreeModel = AsyncTreeModel(myFileTreeModel, this)
+    private val myFileTreeModel = PluginTreeMode(tree) {
+        listOf(
+            LivePlugin("C:\\Users\\qaq\\Downloads\\mingw64\\a".toFilePath()),
+            LivePlugin("C:\\Users\\qaq\\Downloads\\mingw64\\b".toFilePath()),
+            LivePlugin("C:\\Users\\qaq\\Downloads\\mingw64\\c".toFilePath())
+        )
+    }
+//    private val myAsyncTreeModel = AsyncTreeModel(myFileTreeModel, this)
 
     init {
-        myTree.model = myAsyncTreeModel
+        myTree.model = myFileTreeModel
         myTree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
-        //todo
         myTree.cellRenderer = object : ColoredTreeCellRenderer() {
             override fun customizeCellRenderer(tree: JTree, value: Any?, selected: Boolean, expanded: Boolean, leaf: Boolean, row: Int, hasFocus: Boolean) {
-                var name: String? = null
                 if (value is PluginTreeMode.Node) {
                     this.icon = value.icon
-                    name = value.name
-                    var style = SimpleTextAttributes.STYLE_PLAIN
-                    if (!value.isValid) {
-                        style = style or SimpleTextAttributes.STYLE_STRIKEOUT
+                    value.name?.let {
+                        var style = SimpleTextAttributes.STYLE_PLAIN
+                        if (!value.isValid) {
+                            style = style or SimpleTextAttributes.STYLE_STRIKEOUT
+                        }
+                        this.append(it, SimpleTextAttributes(style, null))
                     }
-                    val attributes = SimpleTextAttributes(style, color)
-                    if (name != null) this.append(name, attributes)
                 }
             }
-
         }
 
         TreeUIHelper.getInstance().installTreeSpeedSearch(myTree)
         TreeUtil.installActions(myTree)
         registerTreeActions()
     }
-
 
     private fun registerTreeActions() {
         myTree.registerKeyboardAction(
@@ -79,7 +82,6 @@ open class PluginTree(tree: Tree) : FileSystemTree {
             }
         }
     }
-
 
     override fun areHiddensShown(): Boolean {
         return false
@@ -123,11 +125,9 @@ open class PluginTree(tree: Tree) : FileSystemTree {
             .onSuccess { if (it != null && onDone != null) onDone.run() }
     }
 
-
     override fun getTree(): JTree {
         return myTree
     }
-
 
     override fun getNewFileParent(): VirtualFile? {
         return selectedFile

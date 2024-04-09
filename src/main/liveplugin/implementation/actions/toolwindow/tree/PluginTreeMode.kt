@@ -1,28 +1,37 @@
 package liveplugin.implementation.actions.toolwindow.tree
 
+import com.intellij.icons.AllIcons.Nodes.ErrorMark
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.fileChooser.tree.FileRefresher
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.Iconable
 import com.intellij.openapi.util.Pair
+import com.intellij.openapi.vfs.VFileProperty
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.*
+import com.intellij.ui.LayeredIcon
 import com.intellij.ui.tree.MapBasedTree
 import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.IconUtil.getIcon
+import com.intellij.util.PlatformIcons
 import com.intellij.util.concurrency.Invoker
 import com.intellij.util.concurrency.InvokerSupplier
 import com.intellij.util.ui.tree.AbstractTreeModel
+import liveplugin.implementation.LivePlugin
+import liveplugin.implementation.common.Icons.pluginIcon
+import liveplugin.implementation.common.IdeUtil.runLaterOnEdt
 import javax.swing.Icon
 
-class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel(), InvokerSupplier {
+class PluginTreeMode(tree: Tree, pluginProvider: () -> List<LivePlugin>) : AbstractTreeModel(), InvokerSupplier {
     private val invoker = Invoker.forBackgroundThreadWithReadAction(this)
-    private val pluginTree: PluginTree
+    private val treeModel: TreeModel
 
     init {
         val refresher = FileRefresher(true, 3) { ModalityState.stateForComponent(tree) }
-        pluginTree = PluginTree(refresher, pluginList)
+        treeModel = TreeModel(refresher, pluginProvider)
         Disposer.register(this, refresher)
         ApplicationManager.getApplication().messageBus.connect(this).subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
             override fun after(events: List<VFileEvent>) {
@@ -33,7 +42,7 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
 
     fun invalidate() {
         invoker.invoke {
-            pluginTree.invalidate()
+            treeModel.invalidate()
             treeStructureChanged(null, null, null)
         }
     }
@@ -43,19 +52,19 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
     }
 
     override fun getRoot(): Any {
-        return pluginTree.getRootEntry().node
+        return treeModel.getRootEntry().node
     }
 
     override fun getChild(node: Any, index: Int): Any? {
         return if (node is Node) {
-            pluginTree.getChildNode(node, index)
+            treeModel.getChildNode(node, index)
         } else null
 
     }
 
     override fun getChildCount(node: Any): Int {
         if (node is Node) {
-            val entry = pluginTree.getEntry(node, true)
+            val entry = treeModel.getEntry(node, true)
             if (entry != null) return entry.childCount
         }
         return 0
@@ -63,7 +72,7 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
 
     override fun isLeaf(node: Any): Boolean {
         if (node is Node) {
-            val entry = pluginTree.getEntry(node, false)
+            val entry = treeModel.getEntry(node, false)
             return entry?.isLeaf ?: false
         }
         return false
@@ -71,7 +80,7 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
 
     override fun getIndexOfChild(parent: Any, child: Any): Int {
         if (parent is Node && child is Node) {
-            val entry = pluginTree.getEntry(parent, true)
+            val entry = treeModel.getEntry(parent, true)
             if (entry != null) return entry.getIndexOf(child)
         }
         return -1
@@ -85,7 +94,7 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
                 is VFileMoveEvent           -> {
                     val entry = event.file.findEntry()
                     if (entry != null && entry.isPluginRoot()) {
-                        pluginTree.getRootEntry().refresh()
+                        treeModel.getRootEntry().refresh()
                     } else {
                         event.newParent.findEntry()?.refresh()
                         event.oldParent.findEntry()?.refresh()
@@ -96,7 +105,7 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
                     if (event.isRename) {
                         val entry = event.file.findEntry()
                         if (entry != null && entry.isPluginRoot()) {
-                            pluginTree.getRootEntry().refresh()
+                            treeModel.getRootEntry().refresh()
                         } else {
                             event.file.parent.findEntry()?.refresh()
                         }
@@ -106,7 +115,7 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
                 is VFileDeleteEvent         -> {
                     val entry = event.file.findEntry()
                     if (entry != null && entry.isPluginRoot()) {
-                        pluginTree.getRootEntry().refresh()
+                        treeModel.getRootEntry().refresh()
                     } else {
                         event.file.parent.findEntry()?.refresh()
                     }
@@ -115,10 +124,10 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
         }
     }
 
-    private fun VirtualFile?.findEntry() = pluginTree.findEntry(this)
+    private fun VirtualFile?.findEntry() = treeModel.findEntry(this)
 
     private fun MapBasedTree.Entry<Node>.refresh() {
-        val update = pluginTree.updateChildren(this)
+        val update = treeModel.updateChildren(this)
         val removed = update.removed.isNotEmpty()
         val inserted = update.inserted.isNotEmpty()
         val contained = update.contained.isNotEmpty()
@@ -126,37 +135,54 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
             return
         }
         if (!removed && inserted) {
-            listeners.treeNodesInserted(update.getEvent(this@PluginTreeMode, this, update.inserted))
+            runLaterOnEdt {
+                listeners.treeNodesInserted(update.getEvent(this@PluginTreeMode, this, update.inserted))
+            }
             return
         }
         if (!inserted && removed) {
-            listeners.treeNodesRemoved(update.getEvent(this@PluginTreeMode, this, update.removed))
+            runLaterOnEdt {
+                listeners.treeNodesRemoved(update.getEvent(this@PluginTreeMode, this, update.removed))
+            }
             return
         }
-        treeStructureChanged(this, null, null)
+        runLaterOnEdt {
+            treeStructureChanged(this, null, null)
+        }
     }
 
     private fun MapBasedTree.Entry<Node>.isPluginRoot(): Boolean {
-        return this.parentPath == pluginTree.getRootEntry()
+        return this.node.isPluginRoot
     }
 
-    class Node(val file: VirtualFile?) {
-        val name = file?.name
+    class Node(val name: String?, val file: VirtualFile?, val isPluginRoot: Boolean) {
+        val isValid: Boolean
+            get() {
+                if (file == null) return false
+                if (!file.isValid) return false
+                return file.isDirectory || !isPluginRoot
+            }
         val icon: Icon?
-        val isValid = file?.isValid ?: false
-
-        init {
-            icon = file?.icon
-        }
+            get() {
+                if (file == null) return null
+                if (isPluginRoot) return pluginIcon
+                if (!isValid) return ErrorMark
+                val baseIcon = getIcon(file, Iconable.ICON_FLAG_READ_STATUS, null)
+                return if (file.`is`(VFileProperty.SYMLINK)) {
+                    LayeredIcon.layeredIcon(arrayOf(baseIcon, PlatformIcons.SYMLINK_ICON))
+                } else {
+                    baseIcon
+                }
+            }
 
         override fun toString(): String {
-            return name
+            return name ?: ""
         }
     }
 
-    private class PluginTree(private val refresher: FileRefresher, pluginList: List<String>) {
+    private class TreeModel(private val refresher: FileRefresher, val pluginProvider: () -> List<LivePlugin>) {
         private val mbt = MapBasedTree<VirtualFile?, Node>(false) { it.file }
-        private val rootNode = Node(null)
+        private val rootNode = Node("Root", null, false)
 
         init {
             mbt.updateRoot(Pair.create(rootNode, false))
@@ -175,7 +201,7 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
         }
 
         fun getEntry(node: Node, loadChildren: Boolean): MapBasedTree.Entry<Node>? {
-            val entry = mbt.getEntry(node)
+            val entry = if (node == rootNode) getRootEntry() else mbt.getEntry(node)
             return entry?.also {
                 if (loadChildren && it.isLoadingRequired) {
                     updateChildren(it)
@@ -189,25 +215,28 @@ class PluginTreeMode(tree: Tree, pluginList: List<String>) : AbstractTreeModel()
         }
 
         fun updateChildren(parent: MapBasedTree.Entry<Node>): MapBasedTree.UpdateResult<Node> {
-            val children = loadChildren(parent.node) ?: return mbt.update(parent, null)
-            if (children.isEmpty()) return mbt.update(parent, emptyList())
+            val children = loadChildren(parent) ?: return mbt.update(parent, null)
             val list = children
-                .filter { it.isValid }
-                .onEach { if (refresher.isRecursive) refresher.register(it) }
-                .sortedWith(compareBy({ it.isDirectory }, { it.name }))
-                .map { Pair.create(Node(it), !it.isDirectory) }
+                .filter { it.file == null || it.file.isValid }
+                .onEach { if (refresher.isRecursive && it.file != null) refresher.register(it.file) }
+                .sortedWith(compareBy({ it.file?.isDirectory }, { it.name }))
+                .map { Pair.create(it, it.file != null && !it.file.isDirectory) }
                 .toList()
+            mbt.update(parent, null)
             return mbt.update(parent, list)
         }
 
-        private fun loadChildren(node: Node): Array<VirtualFile>? {
-            if (node === rootNode) {
-                return emptyArray()
+
+        private fun loadChildren(parent: MapBasedTree.Entry<Node>): List<Node>? {
+            if (parent.node == rootNode) {
+                return pluginProvider().map { Node(it.id, it.path.toVirtualFile(), true) }.toList()
             } else {
-                val file = node.file
-                return if (file != null && file.isValid && file.isDirectory)
-                    file.children
-                else null
+                val file = parent.node.file
+                if (file == null || !file.isValid || !file.isDirectory) {
+                    return null
+                }
+                val children = file.children ?: return null
+                return children.map { Node(it.name, it, false) }.toList()
             }
         }
     }
