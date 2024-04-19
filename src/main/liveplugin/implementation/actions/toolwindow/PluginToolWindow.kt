@@ -1,37 +1,26 @@
 package liveplugin.implementation.actions.toolwindow
 
-import com.intellij.ide.BrowserUtil
-import com.intellij.ide.DefaultTreeExpander
 import com.intellij.ide.actions.CollapseAllAction
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.impl.PopupMenuPreloader
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runWriteAction
-import com.intellij.openapi.fileChooser.FileChooserDescriptor
-import com.intellij.openapi.fileChooser.FileSystemTree
-import com.intellij.openapi.fileChooser.actions.FileDeleteAction
-import com.intellij.openapi.fileChooser.ex.FileChooserKeys
-import com.intellij.openapi.fileChooser.ex.FileSystemTreeImpl
-import com.intellij.openapi.fileChooser.tree.FileNode
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.util.Disposer
-import com.intellij.openapi.vfs.VfsUtil
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
-import com.intellij.ui.content.Content
+import com.intellij.ui.TreeUIHelper
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.EditSourceOnDoubleClickHandler
 import com.intellij.util.EditSourceOnEnterKeyHandler
 import com.intellij.util.ui.tree.TreeUtil
-import liveplugin.implementation.LivePluginPaths.livePluginsPath
+import liveplugin.implementation.PluginManager
 import liveplugin.implementation.actions.*
 import liveplugin.implementation.actions.gist.AddPluginFromGistAction
 import liveplugin.implementation.actions.git.AddPluginFromGitHubDelegateAction
@@ -42,38 +31,36 @@ import liveplugin.implementation.actions.settings.RunProjectSpecificPluginsActio
 import liveplugin.implementation.actions.toolwindow.NewElementPopupAction.Companion.livePluginNewElementPopup
 import liveplugin.implementation.common.Icons.addPluginIcon
 import liveplugin.implementation.common.Icons.collapseAllIcon
-import liveplugin.implementation.common.Icons.helpIcon
-import liveplugin.implementation.common.Icons.pluginIcon
+import liveplugin.implementation.common.Icons.deletePluginIcon
 import liveplugin.implementation.common.Icons.settingsIcon
 import liveplugin.implementation.common.Icons.sharePluginIcon
-import liveplugin.implementation.common.IdeUtil.groovyFileType
 import liveplugin.implementation.common.IdeUtil.livePluginActionPlace
-import liveplugin.implementation.common.toFilePath
-import liveplugin.implementation.isPluginFolder
-import org.jetbrains.annotations.NonNls
 import java.awt.GridLayout
-import java.awt.event.MouseListener
+import java.awt.event.KeyEvent
 import javax.swing.Icon
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.JTree
+import javax.swing.KeyStroke
+import javax.swing.tree.TreeSelectionModel
 
-class LivePluginToolWindowFactory: ToolWindowFactory, DumbAware {
+class LivePluginToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        toolWindow.contentManager.addContent(PluginToolWindow(project).createContent())
+        val content = ApplicationManager.getApplication().getService(ContentFactory::class.java)
+            .createContent(MySimpleToolWindowPanel(project), "", false)
+        toolWindow.contentManager.addContent(content)
     }
 }
 
-private class PluginToolWindow(project: Project) {
-    private val fileSystemTree = createFileSystemTree(project)
+private class MySimpleToolWindowPanel(val project: Project) : SimpleToolWindowPanel(true) {
+    private val pluginTree: PluginTree
 
-    fun createContent(): Content {
-        val panel = MySimpleToolWindowPanel(true, fileSystemTree).also {
-            it.add(ScrollPaneFactory.createScrollPane(fileSystemTree.tree))
-            it.toolbar = createToolBar()
-        }
-        return ApplicationManager.getApplication().getService(ContentFactory::class.java)
-            .createContent(panel, "", false)
+    init {
+        val tree = MTree()
+        pluginTree = PluginTree({ PluginManager.getPluginList() }, tree)
+        Disposer.register(project, pluginTree)
+
+        this.add(ScrollPaneFactory.createScrollPane(tree))
+        this.toolbar = createToolBar()
     }
 
     private fun createToolBar(): JComponent {
@@ -88,7 +75,7 @@ private class PluginToolWindow(project: Project) {
                 add(AddKotlinExamplesActionGroup())
                 add(AddGroovyExamplesActionGroup())
             }.with(addPluginIcon))
-            add(DeletePluginAction())
+            add(DeleteFiΩleAction(deletePluginIcon))
             add(RunPluginAction())
             add(UnloadPluginAction())
             add(RunPluginTestsAction())
@@ -119,112 +106,68 @@ private class PluginToolWindow(project: Project) {
         }
     }
 
-    private class MySimpleToolWindowPanel(vertical: Boolean, private val fileSystemTree: FileSystemTree): SimpleToolWindowPanel(vertical) {
-        /**
-         * Provides context for actions in plugin tree popup menu.
-         * Without it the actions will be disabled or won't work.
-         *
-         * Implicitly used by
-         * [com.intellij.openapi.fileChooser.actions.NewFileAction],
-         * [com.intellij.openapi.fileChooser.actions.NewFolderAction],
-         * [com.intellij.openapi.fileChooser.actions.FileDeleteAction]
-         */
-        override fun getData(@NonNls dataId: String): Any? =
-            when (dataId) {
-                FileSystemTree.DATA_KEY.name                 -> {
-                    // This is used by "create directory/file" actions to get execution context
-                    // (without it, they will be disabled or won't work).
-                    fileSystemTree
+    override fun getData(dataId: String): Any? {
+        return when (dataId) {
+            PluginTree.DATA_KEY.name -> pluginTree
+            PlatformDataKeys.NAVIGATABLE_ARRAY.name -> {
+                val node = pluginTree.selectedPath()?.lastPathComponent as? MNode
+                if (node != null && node.isValid && !node.file!!.isDirectory) {
+                    arrayOf(OpenFileDescriptor(project, node.file!!))
+                } else {
+                    null
                 }
-                FileChooserKeys.NEW_FILE_TYPE.name           -> groovyFileType
-                FileChooserKeys.DELETE_ACTION_AVAILABLE.name -> true
-                PlatformDataKeys.VIRTUAL_FILE_ARRAY.name     -> fileSystemTree.selectedFiles
-                PlatformDataKeys.TREE_EXPANDER.name          -> DefaultTreeExpander(fileSystemTree.tree)
-                else                                         -> super.getData(dataId)
             }
+
+            else -> super.getData(dataId)
+        }
+    }
+}
+
+
+class MTree : Tree() {
+    init {
+        emptyText.text = "No plugins to show"
+        isRootVisible = false
+        selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
+
+        installTreeActions()
     }
 
-    private class ShowHelpAction: AnAction("Show Help on GitHub", "Open help page on GitHub", helpIcon), DumbAware {
-        override fun actionPerformed(e: AnActionEvent) =
-            BrowserUtil.browse("https://github.com/dkandalov/live-plugin#getting-started")
+
+    private fun installTreeActions() {
+        TreeUIHelper.getInstance().installTreeSpeedSearch(this)
+        TreeUtil.installActions(this)
+        this.registerKeyboardAction({ performEnterAction(true) }, KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), JComponent.WHEN_FOCUSED)
+
+        EditSourceOnDoubleClickHandler.install(this)
+        EditSourceOnEnterKeyHandler.install(this)
+
+
+        fun shortcutsOf(actionId: String) = KeymapManager.getInstance().activeKeymap.getShortcuts(actionId)
+        NewElementPopupAction().registerCustomShortcutSet(CustomShortcutSet(*shortcutsOf("NewElement")), this)
+
+        val popupActionGroup = DefaultActionGroup(
+            livePluginNewElementPopup,
+            RunLivePluginsGroup(),
+            RenameFileAction().also { it.registerCustomShortcutSet(CustomShortcutSet(*shortcutsOf("RenameElement")), this) },
+            DeleteFileAction(null).also { it.registerCustomShortcutSet(CustomShortcutSet(*shortcutsOf("SafeDelete")), this) }
+        ).also { it.isPopup = true }
+
+        val popupHandler = PopupHandler.installPopupMenu(this, popupActionGroup, livePluginActionPlace)
+        @Suppress("UnstableApiUsage")
+        PopupMenuPreloader.install(this, livePluginActionPlace, popupHandler) { popupActionGroup }
     }
 
-    companion object {
-
-        private fun createFileSystemTree(project: Project): FileSystemTree {
-            val myTree = MyTree(project)
-            EditSourceOnDoubleClickHandler.install(myTree) // This handler only seems to work before creating FileSystemTreeImpl.
-
-            val fileSystemTree = FileSystemTreeImpl(project, createFileChooserDescriptor(), myTree, null, null, null)
-            Disposer.register(project, fileSystemTree)
-            fileSystemTree.tree.let {
-                EditSourceOnEnterKeyHandler.install(it) // This handler only seems to work after creating FileSystemTreeImpl.
-                it.installPopupMenu()
-            }
-            return fileSystemTree
-        }
-
-        private fun createFileChooserDescriptor(): FileChooserDescriptor {
-            val descriptor = object: FileChooserDescriptor(true, true, true, false, true, true) {
-                override fun getIcon(file: VirtualFile) = if (file.toFilePath().isPluginFolder()) pluginIcon else super.getIcon(file)
-                override fun getName(virtualFile: VirtualFile) = virtualFile.name
-                override fun getComment(virtualFile: VirtualFile?) = ""
-            }.also {
-                it.withShowFileSystemRoots(false)
-                it.withTreeRootVisible(false)
-            }
-
-            runWriteAction {
-                descriptor.setRoots(VfsUtil.createDirectoryIfMissing(livePluginsPath.value))
-            }
-
-            return descriptor
-        }
-
-        private fun JTree.installPopupMenu() {
-            fun shortcutsOf(actionId: String) = KeymapManager.getInstance().activeKeymap.getShortcuts(actionId)
-
-            NewElementPopupAction().registerCustomShortcutSet(CustomShortcutSet(*shortcutsOf("NewElement")), this)
-
-            val popupActionGroup = DefaultActionGroup(
-                livePluginNewElementPopup,
-                RunLivePluginsGroup(),
-                RenameFileAction().also { it.registerCustomShortcutSet(CustomShortcutSet(*shortcutsOf("RenameElement")), this) },
-                FileDeleteAction("Delete", "", null).also {
-                    it.templatePresentation.text = "Delete"
-                    it.registerCustomShortcutSet(CustomShortcutSet(*shortcutsOf("SafeDelete")), this)
-                },
-            ).also { it.isPopup = true }
-
-            installPopupHandler(this, popupActionGroup)
-        }
-
-        private fun installPopupHandler(component: JComponent, actionGroup: ActionGroup): MouseListener {
-            val popupHandler = PopupHandler.installPopupMenu(component, actionGroup, livePluginActionPlace)
-            @Suppress("UnstableApiUsage")
-            PopupMenuPreloader.install(component, livePluginActionPlace, popupHandler) { actionGroup }
-            return popupHandler
-        }
-
-        private class MyTree(private val project: Project): Tree(), DataProvider {
-            init {
-                emptyText.text = "No plugins to show"
-                isRootVisible = false
-            }
-
-            override fun getData(@NonNls dataId: String): Any? =
-                when (dataId) {
-                    // NAVIGATABLE_ARRAY is used to open files in tool window on double-click/enter.
-                    PlatformDataKeys.NAVIGATABLE_ARRAY.name       -> {
-                        TreeUtil.collectSelectedObjectsOfType(this, FileNode::class.java)
-                            .mapNotNull { node ->
-                                if (node.file.isDirectory) null // Exclude directories so that they're not navigatable from the tree and EditSourceOnEnterKeyHandler expands/collapses tree nodes.
-                                else OpenFileDescriptor(project, node.file)
-                            }
-                            .toTypedArray()
-                    }
-                    else                                          -> null
+    private fun performEnterAction(toggleNodeState: Boolean) {
+        val path = selectionPath
+        if (path != null) {
+            if (toggleNodeState) {
+                if (isExpanded(path)) {
+                    collapsePath(path)
+                } else {
+                    expandPath(path)
                 }
+            }
         }
     }
 }
