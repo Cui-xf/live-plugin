@@ -7,16 +7,13 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.fileChooser.FileSystemTree;
 import com.intellij.openapi.fileChooser.actions.FileChooserAction;
 import com.intellij.openapi.fileChooser.ex.FileChooserKeys;
-import com.intellij.openapi.fileChooser.ex.FileSystemTreeImpl;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.UnknownFileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.UIBundle;
-import liveplugin.implementation.LivePluginPaths;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,8 +24,10 @@ import java.io.IOException;
  * Originally forked from {@link com.intellij.openapi.fileChooser.actions.NewFileAction}
  */
 public class NewFileAction extends FileChooserAction {
-    @Nullable private final Icon icon;
-    @Nullable private final FileType fileType;
+    @Nullable
+    private final Icon icon;
+    @Nullable
+    private final FileType fileType;
 
     NewFileAction(String text, @NotNull FileType fileType) {
         this(text, fileType.getIcon(), fileType);
@@ -44,7 +43,7 @@ public class NewFileAction extends FileChooserAction {
         Presentation presentation = e.getPresentation();
         presentation.setVisible(true);
         VirtualFile selectedFile = fileSystemTree.getNewFileParent();
-        presentation.setEnabled(selectedFile != null && !selectedFile.equals(LocalFileSystem.getInstance().findFileByPath(LivePluginPaths.livePluginsPath.getValue())));
+        presentation.setEnabled(selectedFile != null);
         // FORK DIFF (got rid of layered "new" icon because it's ugly)
         presentation.setIcon(icon);
     }
@@ -65,55 +64,55 @@ public class NewFileAction extends FileChooserAction {
         String newFileName;
         while (true) {
             newFileName = Messages.showInputDialog(UIBundle.message("create.new.file.enter.new.file.name.prompt.text"),
-                UIBundle.message("new.file.dialog.title"), Messages.getQuestionIcon());
+                    UIBundle.message("new.file.dialog.title"), Messages.getQuestionIcon());
             if (newFileName == null) {
                 return;
             }
             if ("".equals(newFileName.trim())) {
                 Messages.showMessageDialog(UIBundle.message("create.new.file.file.name.cannot.be.empty.error.message"),
-                    UIBundle.message("error.dialog.title"), Messages.getErrorIcon());
+                        UIBundle.message("error.dialog.title"), Messages.getErrorIcon());
                 continue;
             }
 
             @SuppressWarnings("ThrowableResultOfMethodCallIgnored")
-            Exception failReason = createNewFile(project, (FileSystemTreeImpl) fileSystemTree, file, newFileName, fileType, initialContent);
+            Exception failReason = createNewFile(project, fileSystemTree, file, newFileName, fileType, initialContent);
             if (failReason != null) {
                 Messages.showMessageDialog(UIBundle.message("create.new.file.could.not.create.file.error.message", newFileName),
-                    UIBundle.message("error.dialog.title"), Messages.getErrorIcon());
+                        UIBundle.message("error.dialog.title"), Messages.getErrorIcon());
                 continue;
             }
             return;
         }
     }
 
-    // modified copy of com.intellij.openapi.fileChooser.ex.FileSystemTreeImpl.createNewFile()
-    public static Exception createNewFile(Project project, final FileSystemTreeImpl fileSystemTree,
-                                    final VirtualFile parentDirectory, final String newFileName,
-                                    final FileType fileType, final String initialContent) {
+    // modified copy of liveplugin.implementation.actions.toolwindow.tree.FileSystemTreeImpl.createNewFile()
+    public static Exception createNewFile(Project project, final FileSystemTree fileSystemTree,
+                                          final VirtualFile parentDirectory, final String newFileName,
+                                          final FileType fileType, final String initialContent) {
         final Exception[] failReason = new Exception[]{null};
         CommandProcessor.getInstance().executeCommand(
-            project, new Runnable() {
-                public void run() {
-                    ApplicationManager.getApplication().runWriteAction(new Runnable() {
-                        public void run() {
-                            try {
-                                String newFileNameWithExtension = newFileName;
-                                if (fileType != null && !(fileType instanceof UnknownFileType)) {
-                                    newFileNameWithExtension = newFileName.endsWith('.' + fileType.getDefaultExtension()) ? newFileName : newFileName + '.' + fileType.getDefaultExtension();
+                project, new Runnable() {
+                    public void run() {
+                        ApplicationManager.getApplication().runWriteAction(new Runnable() {
+                            public void run() {
+                                try {
+                                    String newFileNameWithExtension = newFileName;
+                                    if (fileType != null && !(fileType instanceof UnknownFileType)) {
+                                        newFileNameWithExtension = newFileName.endsWith('.' + fileType.getDefaultExtension()) ? newFileName : newFileName + '.' + fileType.getDefaultExtension();
+                                    }
+                                    final VirtualFile file = parentDirectory.createChildData(this, newFileNameWithExtension);
+                                    VfsUtil.saveText(file, initialContent != null ? initialContent : "");
+//                                    fileSystemTree.updateTree();
+                                    fileSystemTree.select(file, null);
+                                } catch (IOException e) {
+                                    failReason[0] = e;
                                 }
-                                final VirtualFile file = parentDirectory.createChildData(this, newFileNameWithExtension);
-                                VfsUtil.saveText(file, initialContent != null ? initialContent : "");
-                                fileSystemTree.updateTree();
-                                fileSystemTree.select(file, null);
-                            } catch (IOException e) {
-                                failReason[0] = e;
                             }
-                        }
-                    });
-                }
-            },
-            UIBundle.message("file.chooser.create.new.file.command.name"),
-            null
+                        });
+                    }
+                },
+                UIBundle.message("file.chooser.create.new.file.command.name"),
+                null
         );
         return failReason[0];
     }

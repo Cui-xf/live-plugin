@@ -3,6 +3,7 @@ package liveplugin.implementation
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.project.Project
+import isCustomDirPlugin
 import liveplugin.implementation.LivePluginPaths.livePluginsPath
 import liveplugin.implementation.LivePluginPaths.livePluginsProjectDirName
 import liveplugin.implementation.common.FilePath
@@ -35,7 +36,8 @@ fun FilePath.isPartOfPlugin(): Boolean =
 fun FilePath.isPluginFolder(): Boolean {
     if (!isDirectory && exists()) return false
     val parentPath = parent ?: return false
-    return parentPath == livePluginsPath ||
+    return if (this.isCustomDirPlugin()) true
+    else parentPath == livePluginsPath ||
         parentPath.name == livePluginsProjectDirName ||
         name == livePluginsProjectDirName
 }
@@ -48,7 +50,9 @@ object LivePluginPaths {
 
     // Use scratches location because it's more standard for keeping scripts, e.g. from IDE console.
     val livePluginsCompiledPath = PathManager.getScratchPath().toFilePath() + "live-plugins-compiled"
-    @JvmField val livePluginsPath = PathManager.getScratchPath().toFilePath() + "live-plugins"
+
+    @JvmField
+    val livePluginsPath = PathManager.getScratchPath().toFilePath() + "live-plugins"
     val oldLivePluginsCompiledPath = PathManager.getPluginsPath().toFilePath() + "live-plugins-compiled"
     val oldLivePluginsPath = PathManager.getPluginsPath().toFilePath() + "live-plugins"
     val livePluginsProjectDirName = ".live-plugins"
